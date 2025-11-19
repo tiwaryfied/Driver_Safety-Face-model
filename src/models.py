@@ -1,3 +1,63 @@
+import tensorflow as tf
+def create_attention_block(input_tensor, num_heads=8, key_dim=64):
+attention_output = MultiHeadAttention(num_heads=num_heads, key_dim=key_dim, dropout=0.1)(input_tensor, input_tensor)
+x = LayerNormalization()(Add()([input_tensor, attention_output]))
+return x
+
+
+
+
+def create_spatial_feature_extractor(input_shape):
+inputs = Input(shape=input_shape)
+x = Conv2D(32, (3, 3), activation='relu', padding='same')(inputs)
+x = BatchNormalization()(x)
+x = MaxPooling2D((2, 2))(x)
+x = Dropout(0.2)(x)
+
+
+x = Conv2D(64, (3, 3), activation='relu', padding='same')(x)
+x = BatchNormalization()(x)
+x = MaxPooling2D((2, 2))(x)
+x = Dropout(0.3)(x)
+
+
+x = Conv2D(128, (3, 3), activation='relu', padding='same')(x)
+x = BatchNormalization()(x)
+x = MaxPooling2D((2, 2))(x)
+x = Dropout(0.3)(x)
+
+
+x = Conv2D(256, (3, 3), activation='relu', padding='same')(x)
+x = BatchNormalization()(x)
+x = GlobalAveragePooling2D()(x)
+x = Dropout(0.4)(x)
+
+
+model = Model(inputs, x, name="spatial_extractor")
+return model
+
+
+
+
+def create_proposed_astn_model(input_shape, num_classes, sequence_length=10):
+input_sequence = Input(shape=(sequence_length, *input_shape), name="input_sequence")
+spatial_extractor = create_spatial_feature_extractor(input_shape)
+
+
+# Extract features per-frame using Lambda, then stack
+temporal_features = []
+for i in range(sequence_length):
+frame_features = tf.keras.layers.Lambda(lambda x: x[:, i, :, :, :])(input_sequence)
+spatial_feat = spatial_extractor(frame_features)
+temporal_features.append(spatial_feat)
+
+
+temporal_sequence = tf.stack(temporal_features, axis=1)
+
+
+lstm_branch = LSTM(128, return_sequences=True, dropout=0.3)(temporal_sequence)
+lstm_branch = create_attention_block(lstm_branch, num_heads=8, key_dim=64)
+lstm_branch = LSTM(64, dropout=0.2)(lstm_branch)
 lstm_branch = LSTM(64, dropout=0.2)(lstm_branch)
 lstm_branch = Dense(64, activation='relu', kernel_regularizer=l2(0.001))(lstm_branch)
 lstm_branch = Dropout(0.4)(lstm_branch)
